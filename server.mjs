@@ -23,7 +23,7 @@ const date = v => typeof v === 'string' && Number.isFinite(Date.parse(v)) ? new 
 function url(value, apiOrigin) {
   try {
     const u = new URL(value);
-    if (u.origin !== apiOrigin || !['/api/v1/auth/guest/', '/api/v1/auth/me/'].includes(u.pathname)) return '[url omitted]';
+    if (u.origin !== apiOrigin || !['/api/v1/auth/guest/', '/api/v1/auth/me/', '/api/v1/health/', '/api/v1/ready/'].includes(u.pathname)) return '[url omitted]';
     return `${u.origin}${u.pathname}`;
   } catch { return null; }
 }
@@ -44,6 +44,23 @@ function bodyPreview(value) {
   }
   return out;
 }
+function requestRecord(r, apiOrigin) {
+  return {
+      requestId: /^saqtau-[a-z0-9-]{8,64}$/.test(r?.requestId || '') ? r.requestId : null,
+      serverRequestId: /^[a-f0-9]{32}$/.test(r?.serverRequestId || '') ? r.serverRequestId : null,
+      networkRevision: clean(r?.networkRevision, 80),
+      fetchConfiguration: ['react-native-requested','expo-default'].includes(r?.fetchConfiguration) ? r.fetchConfiguration : null,
+      startedAtUtc: date(r?.startedAtUtc), endedAtUtc: date(r?.endedAtUtc),
+      durationMs: number(r?.durationMs), timeoutMs: number(r?.timeoutMs), attempt: number(r?.attempt),
+      url: url(r?.url, apiOrigin), finalUrl: url(r?.finalUrl, apiOrigin),
+      method: ['GET','POST'].includes(r?.method) ? r.method : null,
+      stage: clean(r?.stage, 30), code: clean(r?.code, 30),
+      timeoutSource: r?.timeoutSource === 'client-deadline' ? r.timeoutSource : null,
+      authorizationPresent: bool(r?.authorizationPresent), responseReceived: bool(r?.responseReceived),
+      httpStatus: number(r?.httpStatus), redirected: bool(r?.redirected), contentType: clean(r?.contentType, 100),
+      originalError: original(r?.originalError), errorBodyPreview: bodyPreview(r?.errorBodyPreview),
+  };
+}
 export function sanitizeReport(input, apiOrigin) {
   if (input?.schema !== 1 || !/^startup-[a-z0-9-]{8,70}$/.test(input.id || '') ||
       !/^SESSION-[A-Z_]+(?:-\d{3})?$/.test(input.supportCode || '') ||
@@ -54,16 +71,10 @@ export function sanitizeReport(input, apiOrigin) {
     createdAtUtc: date(input.createdAtUtc), receivedAtUtc: new Date().toISOString(),
     app: Object.fromEntries(['version','build','platform','osVersion','model'].map(k => [k, clean(input.app?.[k], 100)])),
     network: { type: clean(input.network?.type, 30), isConnected: bool(input.network?.isConnected), isInternetReachable: bool(input.network?.isInternetReachable) },
-    requests: input.requests.map(r => ({
-      startedAtUtc: date(r?.startedAtUtc), endedAtUtc: date(r?.endedAtUtc),
-      durationMs: number(r?.durationMs), timeoutMs: number(r?.timeoutMs), attempt: number(r?.attempt),
-      url: url(r?.url, apiOrigin), finalUrl: url(r?.finalUrl, apiOrigin),
-      method: ['GET','POST'].includes(r?.method) ? r.method : null,
-      stage: clean(r?.stage, 30), code: clean(r?.code, 30),
-      authorizationPresent: bool(r?.authorizationPresent), responseReceived: bool(r?.responseReceived),
-      httpStatus: number(r?.httpStatus), redirected: bool(r?.redirected), contentType: clean(r?.contentType, 100),
-      originalError: original(r?.originalError), errorBodyPreview: bodyPreview(r?.errorBodyPreview),
-    })),
+    requests: input.requests.map(r => requestRecord(r, apiOrigin)),
+    connectivity: (Array.isArray(input.connectivity) ? input.connectivity : []).slice(-2)
+      .filter(r => ['/api/v1/health/', '/api/v1/ready/'].some(path => url(r?.url, apiOrigin) === `${apiOrigin}${path}`))
+      .map(r => requestRecord(r, apiOrigin)),
   };
 }
 
